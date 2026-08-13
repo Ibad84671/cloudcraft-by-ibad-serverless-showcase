@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CloudCraft by Ibad</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0d1117; color: #e6edf3; display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; padding: 20px; }
+        h1 { font-size: 3rem; background: linear-gradient(135deg, #3fb950, #58a6ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: #1a2a3a; color: #ff9900; border: 1px solid #ff9900; margin: 4px; }
+        .status { margin: 20px 0; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #3fb950; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .links a { color: #58a6ff; text-decoration: none; margin: 0 12px; }
+        .links a:hover { text-decoration: underline; }
+        .footer { margin-top: 30px; font-size: 0.8rem; color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div>
+        <h1>☁️ CloudCraft</h1>
+        <p style="font-size:1.2rem;color:#8b949e;margin-top:8px;">Serverless AWS Showcase</p>
+        <div style="margin:12px 0;">
+            <span class="badge">AWS</span>
+            <span class="badge" style="border-color:#3fb950;color:#3fb950;">Serverless</span>
+            <span class="badge" style="border-color:#623ce4;color:#623ce4;">Terraform</span>
+        </div>
+        <div class="status">
+            <span class="status-dot"></span>
+            <span style="margin-left:8px;">Live · AWS us-east-1</span>
+        </div>
+        <div class="links">
+            <a href="https://github.com/Ibad84671/cloudcraft-by-ibad-serverless-showcase">GitHub</a>
+            <a href="#">Docs</a>
+        </div>
+        <div class="footer">Made with ❤️ by Ibad · MIT License</div>
+    </div>
+</body>
+</html>
