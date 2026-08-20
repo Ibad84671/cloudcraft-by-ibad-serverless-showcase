@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudCraft by Ibad - AWS serverless showcase infrastructure.
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloudcraft
+    AllowedPattern: '^[a-z0-9-]+$'
+  EnvironmentName:
+    Type: String
+    Default: demo
+    AllowedValues: [demo, development, production]
+  AllowedOrigin:
+    Type: String
+    Default: '*'
+Resources:
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  CloudFrontOriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub '${ProjectName}-${EnvironmentName}-oai'
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::cloudfront:user/CloudFront Origin Access Identity ${CloudFrontOriginAccessIdentity}'
+            Action: s3:GetObject
+            Resource: !Sub '${WebsiteBucket.Arn}/*'
+  ItemsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudCraftItemsAndLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:Scan]
+                Resource: !GetAtt ItemsTable.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectName}-${EnvironmentName}-*:*'
+  GetItemsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-${EnvironmentName}-get-items'
+      RetentionInDays: 14
+  PutItemsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-${EnvironmentName}-put-items'
+      RetentionInDays: 14
+  GetItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-get-items'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 5
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemsTable
+      Code:
+        ZipFile: |
+          const {DynamoDBClient}=require('@aws-sdk/client-dynamodb');
+          const {DynamoDBDocumentClient,ScanCommand}=require('@aws-sdk/lib-dynamodb');
+          const db=DynamoDBDocumentClient.from(new DynamoDBClient({}));
+          exports.handler=async(event,context)=>{const headers={'content-type':'application/json','cache-control':'no-store'};try{const r=await db.send(new ScanCommand({TableName:process.env.TABLE_NAME,Limit:50}));return{statusCode:200,headers,body:JSON.stringify({status:'success',data:r.Items||[],requestId:context.awsRequestId})};}catch(e){console.error(JSON.stringify({requestId:context.awsRequestId,error:e.message}));return{statusCode:500,headers,body:JSON.stringify({status:'error',message:'Unable to read items',requestId:context.awsRequestId})};}};
+  PutItemsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-${EnvironmentName}-put-items'
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 5
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemsTable
+      Code:
+        ZipFile: |
+          const {DynamoDBClient}=require('@aws-sdk/client-dynamodb');
+          const {DynamoDBDocumentClient,PutCommand}=require('@aws-sdk/lib-dynamodb');
+          const db=DynamoDBDocumentClient.from(new DynamoDBClient({}));
+          exports.handler=async(event,context)=>{const headers={'content-type':'application/json','cache-control':'no-store'};try{const b=typeof event.body==='string'?JSON.parse(event.body||'{}'):(event.body||{});const name=String(b.name||'').trim();const description=String(b.description||'').trim();if(!name||name.length>100||description.length>500)return{statusCode:400,headers,body:JSON.stringify({status:'error',message:'Invalid item fields',requestId:context.awsRequestId})};const item={id:context.awsRequestId,name,description,createdAt:new Date().toISOString()};await db.send(new PutCommand({TableName:process.env.TABLE_NAME,Item:item}));return{statusCode:201,headers,body:JSON.stringify({status:'success',data:item,requestId:context.awsRequestId})};}catch(e){console.error(JSON.stringify({requestId:context.awsRequestId,error:e.message}));return{statusCode:400,headers,body:JSON.stringify({status:'error',message:'Invalid request',requestId:context.awsRequestId})};}};
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${ProjectName}-${EnvironmentName}-api'
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET, PUT, OPTIONS]
+        AllowHeaders: [content-type]
+        MaxAge: 300
+  GetIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetItemsFunction.Arn
+      PayloadFormatVersion: '2.0'
+  PutIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt PutItemsFunction.Arn
+      PayloadFormatVersion: '2.0'
+  GetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'GET /items'
+      Target: !Sub 'integrations/${GetIntegration}'
+  PutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: 'PUT /items'
+      Target: !Sub 'integrations/${PutIntegration}'
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: '$default'
+      AutoDeploy: true
+  GetPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetItemsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+  PutPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PutItemsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt WebsiteBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          ForwardedValues:
+            QueryString: false
+            Cookies: {Forward: none}
+        PriceClass: PriceClass_100
+        ViewerCertificate: {CloudFrontDefaultCertificate: true}
+        Restrictions:
+          GeoRestriction: {RestrictionType: none}
+Outputs:
+  CloudFrontUrl:
+    Description: CloudCraft frontend URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+  WebsiteBucketName:
+    Value: !Ref WebsiteBucket
+  ApiUrl:
+    Value: !GetAtt HttpApi.ApiEndpoint
+  ItemsTableName:
+    Value: !Ref ItemsTable
