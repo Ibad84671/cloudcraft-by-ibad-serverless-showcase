@@ -1,28 +1,22 @@
-// ─── PUT-ITEMS LAMBDA ───
-exports.handler = async (event) => {
-    console.log('Event:', JSON.stringify(event));
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
 
-    try {
-        const body = JSON.parse(event.body || '{}');
-        const newItem = {
-            id: Date.now().toString(),
-            name: body.name || 'Unnamed',
-            description: body.description || ''
-        };
+const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-        return {
-            statusCode: 201,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            body: JSON.stringify({ status: 'success', data: newItem })
-        };
-    } catch (error) {
-        console.error('Error:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ status: 'error', message: error.message })
-        };
+exports.handler = async (event = {}, context) => {
+  const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+  try {
+    const body = typeof event.body === 'string' ? JSON.parse(event.body || '{}') : (event.body || {});
+    const name = String(body.name || '').trim();
+    const description = String(body.description || '').trim();
+    if (!name || name.length > 100 || description.length > 500) {
+      return { statusCode: 400, headers, body: JSON.stringify({ status: 'error', message: 'Invalid item fields', requestId: context.awsRequestId }) };
     }
+    const item = { id: context.awsRequestId, name, description, createdAt: new Date().toISOString() };
+    await db.send(new PutCommand({ TableName: process.env.TABLE_NAME, Item: item }));
+    return { statusCode: 201, headers, body: JSON.stringify({ status: 'success', data: item, requestId: context.awsRequestId }) };
+  } catch (error) {
+    console.error(JSON.stringify({ requestId: context.awsRequestId, error: error.message }));
+    return { statusCode: 400, headers, body: JSON.stringify({ status: 'error', message: 'Invalid request', requestId: context.awsRequestId }) };
+  }
 };
