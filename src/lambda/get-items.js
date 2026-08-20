@@ -1,26 +1,23 @@
-// ─── GET-ITEMS LAMBDA ───
-exports.handler = async (event) => {
-    console.log('Event:', JSON.stringify(event));
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 
-    try {
-        const items = [
-            { id: '1', name: 'Item 1', description: 'Sample item from Lambda' },
-            { id: '2', name: 'Item 2', description: 'Another sample item' }
-        ];
+const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-        return {
-            statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            body: JSON.stringify({ status: 'success', data: items })
-        };
-    } catch (error) {
-        console.error('Error:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ status: 'error', message: error.message })
-        };
-    }
+exports.handler = async (event = {}, context) => {
+  const headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };
+  try {
+    const result = await db.send(new ScanCommand({ TableName: process.env.TABLE_NAME, Limit: 50 }));
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ status: 'success', data: result.Items || [], requestId: context.awsRequestId })
+    };
+  } catch (error) {
+    console.error(JSON.stringify({ requestId: context.awsRequestId, error: error.message }));
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ status: 'error', message: 'Unable to read items', requestId: context.awsRequestId })
+    };
+  }
 };
