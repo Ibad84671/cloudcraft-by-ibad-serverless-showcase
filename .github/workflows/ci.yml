@@ -1,34 +1,36 @@
-name: CI Pipeline
+name: CloudCraft CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, 'upgrade/**']
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  terraform-validate:
-    name: 🔍 Terraform Validate
+  validate:
+    name: Validate infrastructure and application
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - name: Validate CloudFormation
+        uses: aws-actions/aws-cloudformation-lint@v2
         with:
-          terraform_version: 1.6.0
-      - name: Terraform Init
-        run: cd infrastructure && terraform init -backend=false
-      - name: Terraform Validate
-        run: cd infrastructure && terraform validate
-      - name: Terraform Format
-        run: cd infrastructure && terraform fmt -check
-
-  security:
-    name: 🛡️ Security Scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Checkov
-        uses: bridgecrewio/checkov-action@master
+          args: infrastructure/cloudformation/template.yaml
+      - name: Check JavaScript syntax
+        run: |
+          node --check src/lambda/get-items.js
+          node --check src/lambda/put-items.js
+      - name: Check frontend markers
+        run: |
+          test -f src/index.html
+          grep -q 'CloudCraft' src/index.html
+          grep -q 'CloudFormation' src/index.html
+      - name: Scan IaC with Checkov
+        uses: bridgecrewio/checkov-action@v12
         with:
-          directory: ./
-          framework: terraform
+          directory: infrastructure/cloudformation
+          framework: cloudformation
+          soft_fail: false
